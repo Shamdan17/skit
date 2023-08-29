@@ -10,6 +10,7 @@ import shutil
 import numpy as np
 import torch
 from tqdm import tqdm
+from zipfile import BadZipFile
 
 
 class DatasetPreloader(torch.utils.data.Dataset):
@@ -70,7 +71,14 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         if self._iscached(idx):
-            return self._read_from_cache(idx)
+            try:
+                return self._read_from_cache(idx)
+            except BadZipFile:
+                print(
+                    f"Cache file at {self._get_idx_path(idx)} is corrupted. Deleting and reloading."
+                )
+                os.remove(self._get_idx_path(idx))
+                return self.__getitem__(idx)
         else:
             el = self.dataset[idx]
             save_path = self._get_idx_path(idx)
@@ -89,12 +97,15 @@ class DatasetPreloader(torch.utils.data.Dataset):
             return el
 
     def _read_from_cache(self, idx):
-        return self._unwrap_data(
-            {
-                k: torch.from_numpy(v)
-                for k, v in np.load(self._get_idx_path(idx)).items()
-            }
-        )
+        try:
+            return self._unwrap_data(
+                {
+                    k: torch.from_numpy(v)
+                    for k, v in np.load(self._get_idx_path(idx)).items()
+                }
+            )
+        except BadZipFile
+        
 
     def _get_idx_path(self, idx):
         if self.block_size > 0:
