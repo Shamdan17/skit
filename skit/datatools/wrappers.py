@@ -75,7 +75,13 @@ class DatasetPreloader(torch.utils.data.Dataset):
                 return self._read_from_cache(idx)
             except BadZipFile:
                 print(
-                    f"Cache file at {self._get_idx_path(idx)} is corrupted. Deleting and reloading."
+                    f"Cache file at {self._get_idx_path(idx)} is corrupted and raised a BadZipFile error. Deleting and reloading."
+                )
+                os.remove(self._get_idx_path(idx))
+                return self.__getitem__(idx)
+            except ValueError:
+                print(
+                    f"Cache file at {self._get_idx_path(idx)} is corrupted and raised a ValueError. Deleting and reloading."
                 )
                 os.remove(self._get_idx_path(idx))
                 return self.__getitem__(idx)
@@ -97,15 +103,12 @@ class DatasetPreloader(torch.utils.data.Dataset):
             return el
 
     def _read_from_cache(self, idx):
-        try:
-            return self._unwrap_data(
-                {
-                    k: torch.from_numpy(v)
-                    for k, v in np.load(self._get_idx_path(idx)).items()
-                }
-            )
-        except BadZipFile
-        
+        return self._unwrap_data(
+            {
+                k: torch.from_numpy(v)
+                for k, v in np.load(self._get_idx_path(idx)).items()
+            }
+        )
 
     def _get_idx_path(self, idx):
         if self.block_size > 0:
