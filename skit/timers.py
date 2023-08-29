@@ -1,5 +1,4 @@
 import timeit
-from typing import Any
 
 
 class BlockTimer:
@@ -11,6 +10,7 @@ class BlockTimer:
     Code block 'Part A' took: 1.63 ms
     > with BlockTimer():
     >     # Code block
+    Code block took: 45.61 ms
     """
 
     def __init__(self, name=None):

@@ -6,7 +6,6 @@
 # expensive preprocessing steps by only doing it once.
 
 import os
-import json
 import shutil
 import numpy as np
 import torch
@@ -62,7 +61,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
         self.samples_to_confirm_cache = samples_to_confirm_cache
 
-        self.infer_dataest_type()
+        self.infer_dataset_type()
 
         self._load_cache()
 
@@ -70,39 +69,42 @@ class DatasetPreloader(torch.utils.data.Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        if self.iscached(idx):
-            return self.read_from_cache(idx)
+        if self._iscached(idx):
+            return self._read_from_cache(idx)
         else:
             el = self.dataset[idx]
-            save_path = self.get_idx_path(idx)
+            save_path = self._get_idx_path(idx)
             if not os.path.exists(os.path.dirname(save_path)):
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
             if self.compress:
                 np.savez_compressed(
-                    self.get_idx_path(idx),
-                    **self.wrap_data(el),
+                    self._get_idx_path(idx),
+                    **self._wrap_data(el),
                 )
             else:
                 np.savez(
-                    self.get_idx_path(idx),
-                    **self.wrap_data(el),
+                    self._get_idx_path(idx),
+                    **self._wrap_data(el),
                 )
             return el
 
-    def read_from_cache(self, idx):
-        return self.unwrap_data(
-            {k: torch.from_numpy(v) for k, v in np.load(self.get_idx_path(idx)).items()}
+    def _read_from_cache(self, idx):
+        return self._unwrap_data(
+            {
+                k: torch.from_numpy(v)
+                for k, v in np.load(self._get_idx_path(idx)).items()
+            }
         )
 
-    def get_idx_path(self, idx):
+    def _get_idx_path(self, idx):
         if self.block_size > 0:
             block_idx = f"{idx // self.block_size}"
         else:
             block_idx = ""
         return os.path.join(self.cache_path, block_idx, f"{idx:0>6}.npz")
 
-    def iscached(self, idx):
-        return os.path.exists(self.get_idx_path(idx))
+    def _iscached(self, idx):
+        return os.path.exists(self._get_idx_path(idx))
 
     def _load_cache(self):
         dataset_len = len(self.dataset)
@@ -133,12 +135,12 @@ class DatasetPreloader(torch.utils.data.Dataset):
                     if self.compress:
                         np.savez_compressed(
                             os.path.join(self.cache_path, f"{idx:0>6}.npz"),
-                            **self.wrap_data(data),
+                            **self._wrap_data(data),
                         )
                     else:
                         np.savez(
                             os.path.join(self.cache_path, f"{idx:0>6}.npz"),
-                            **self.wrap_data(data),
+                            **self._wrap_data(data),
                         )
         else:
             # Randomly sample samples_to_confirm_cache elements from the dataset, check if they match the cache
@@ -151,9 +153,9 @@ class DatasetPreloader(torch.utils.data.Dataset):
             invalid_cache = False
 
             for i in els:
-                if not self.iscached(i):
+                if not self._iscached(i):
                     continue
-                cached = self.read_from_cache(i)
+                cached = self._read_from_cache(i)
                 data = self.dataset[i]
 
                 for k in data.keys():
@@ -194,10 +196,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
     def load_state(self):
         pass
 
-    def getweights(self):
-        return self.dataset.getweights()
-
-    def infer_dataest_type(self):
+    def infer_dataset_type(self):
         instance = self.dataset[0]
 
         if isinstance(instance, dict):
@@ -211,7 +210,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
                 "Please include a minimal reproducible example."
             )
 
-    def unwrap_data(self, data):
+    def _unwrap_data(self, data):
         if self.dtype == "dict":
             return {k: v for k, v in data.items()}
         elif self.dtype == "tuple":
@@ -223,7 +222,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
                 "Please include a minimal reproducible example."
             )
 
-    def wrap_data(self, data):
+    def _wrap_data(self, data):
         if self.dtype == "dict":
             return data
         elif self.dtype == "tuple":
@@ -262,12 +261,12 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
         self._init_cache()
 
     def __getitem__(self, idx):
-        if self.iscached(idx):
-            return self.read_from_cache(idx)
+        if self._iscached(idx):
+            return self._read_from_cache(idx)
         else:
             el = self.dataset[idx]
             el = torch.utils.data._utils.collate.default_convert(el)
-            el_wrapped = self.dataset.wrap_data(el)
+            el_wrapped = self.dataset._wrap_data(el)
             for k in el_wrapped.keys():
                 self.cache[k][idx] = el_wrapped[k]
             self.cached[idx] = True
@@ -277,12 +276,12 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def read_from_cache(self, idx):
-        return self.dataset.unwrap_data(
+    def _read_from_cache(self, idx):
+        return self.dataset._unwrap_data(
             {k: self.cache[k][idx] for k in self.cache.keys()}
         )
 
-    def iscached(self, idx):
+    def _iscached(self, idx):
         return self.cached[idx]
 
     def _init_cache(self):
@@ -290,7 +289,7 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
         sample = self.dataset[idx]
         # Collate to convert to tensors
         sample = torch.utils.data._utils.collate.default_convert(sample)
-        sample = self.dataset.wrap_data(sample)
+        sample = self.dataset._wrap_data(sample)
 
         d_len = len(self.dataset)
 

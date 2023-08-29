@@ -119,3 +119,21 @@ def test_dataset_preloader_dtype(
     wrapped = DatasetPreloader(dataset, cache_path=cache_path)
 
     assert wrapped.dtype == dtype
+
+
+@pytest.mark.parametrize(
+    "wrapper_name,wrapper_class",
+    [
+        ("inmemory", InMemoryDatasetPreloader),
+        ("ondisk", DatasetPreloader),
+    ],
+)
+def test_accessing_dataset_attribute(wrapper_name, wrapper_class):
+    dataset = DummyTupleDataset()
+    cache_path = f"./.cache/{wrapper_name}_dataset_attribute_test"
+    wrapped = wrapper_class(dataset, cache_path=cache_path)
+
+    # Access the data attribute
+    wrapped.data
+
+    assert wrapped.dummy_method() == 1

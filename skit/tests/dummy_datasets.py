@@ -28,6 +28,9 @@ class DummyTupleDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
+    def dummy_method(self):
+        return 1
+
 
 class DummyDictDataset(Dataset):
     def __init__(self, seed=10, size=1000, dim=3):
@@ -51,6 +54,9 @@ class DummyDictDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
+    def dummy_method(self):
+        return 1
+
 
 class DummyIntDataset(Dataset):
     def __init__(self, seed=10, size=1000):
@@ -65,3 +71,6 @@ class DummyIntDataset(Dataset):
 
     def __len__(self):
         return len(self.data)
+
+    def dummy_method(self):
+        return 1
