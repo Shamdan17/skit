@@ -27,20 +27,24 @@ def equals_pytorch(a, b, verbose=True):
             print(b)
         return result
     elif isinstance(a, dict) and isinstance(b, dict):
-        if len(a) != len(b):
+        a_len = len([k for k in a.keys() if not k.startswith("_")])
+        b_len = len([k for k in b.keys() if not k.startswith("_")])
+        if a_len != b_len:
             if verbose:
                 print(
                     "Dicts not equal: different lengths. |a|={}, |b|={}.\n Content: a: {}, b: {}".format(
-                        len(a), len(b), a, b
+                        a_len, b_len, a, b
                     )
                 )
             return False
         for key in a:
+            if key.startswith("_"):
+                continue
             if key not in b:
                 if verbose:
                     print(
                         "Dicts not equal: key {} not in b. |a|={}, |b|={}.\n Content: a: {}, b: {}".format(
-                            key, len(a), len(b), a, b
+                            key, a_len, b_len, a, b
                         )
                     )
                 return False
@@ -48,7 +52,7 @@ def equals_pytorch(a, b, verbose=True):
                 if verbose:
                     print(
                         "Dicts not equal: key {} not equal. |a|={}, |b|={}.\n Content: a: {}, b: {}".format(
-                            key, len(a), len(b), a[key], b[key]
+                            key, a_len, b_len, a[key], b[key]
                         )
                     )
                 return False

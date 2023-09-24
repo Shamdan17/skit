@@ -74,3 +74,20 @@ class DummyIntDataset(Dataset):
 
     def dummy_method(self):
         return 1
+
+
+class DummyDictOnesDataset(Dataset):
+    def __init__(self, size=1000, dim=3):
+        self.size = size
+        self.dim = dim
+
+    def __getitem__(self, idx):
+        return {
+            "ones": torch.ones(self.dim, dtype=torch.float32),
+        }
+
+    def __len__(self):
+        return self.size
+
+    def dummy_method(self):
+        return 1

@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from zipfile import BadZipFile
+from collections.abc import Iterable
 
 
 class DatasetPreloader(torch.utils.data.Dataset):
@@ -178,7 +179,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
                 for k in data.keys():
                     if isinstance(data[k], np.ndarray):
-                        if not np.allclose(data[k], cached[k]):
+                        if k in cached or not np.allclose(data[k], cached[k]):
                             print("Cache mismatch, overwriting cache")
                             invalid_cache = True
                             break
@@ -263,13 +264,11 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
     Args:
         dataset (torch.utils.data.Dataset): The dataset to wrap
         cache_path (str): The path to the cache directory
-        wipe_cache (bool): Whether to wipe the cache if it exists. Otherwise, if a cache exists
-            and is valid, it will be used. If the cache is invalid, the program exits. Default: False
         kwargs: Additional arguments to pass to DatasetPreloader
     """
 
-    def __init__(self, dataset, cache_path, wipe_cache=False, **kwargs):
-        self.dataset = DatasetPreloader(dataset, cache_path, wipe_cache, **kwargs)
+    def __init__(self, dataset, cache_path, **kwargs):
+        self.dataset = DatasetPreloader(dataset, cache_path, **kwargs)
         self.cache_path = cache_path
         self.cached_count = 0
         self._init_cache()
@@ -348,3 +347,114 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
 
     def __getattr__(self, name):
         return getattr(self.dataset, name)
+
+
+class AugmentableDatasetPreloader(torch.utils.data.Dataset):
+    """
+    A wrapper around a torch.utils.data.Dataset which caches the dataset to disk. This is
+    either done on instantiation or lazily when a batch is requested. Furthermore, this
+    wrapper allows the dataset to be augmented on the fly by appending features to the
+    original dataset. This is useful to cache expensive preprocessing or feature extraction
+    steps.
+
+    Warning: Currently only supports datasets which return a dict.
+    > dataset = my_dataset()
+    > dataset = AugmentableDatasetPreloader(dataset, cache_path=cache_path)
+    > a = dataset[0]
+    > output = model(a)
+    > features_to_cache = {"feature_1": output["feature_1"], "feature_2": output["feature_2"]}
+    > dataset.append_features(a, features)
+    > Now, dataset[0] will return a dict with the original features, as well as the appended features.
+
+    # It is highly recommended to do a full pass through the dataset to cache the features first.
+
+    Args:
+        dataset (torch.utils.data.Dataset): The dataset to wrap
+        cache_path (str): The path to the cache directory
+        wipe_cache (bool): Whether to wipe the cache if it exists. Otherwise, if a cache exists
+            and is valid, it will be used. If the cache is invalid, the program exits. Default: False
+        lazy_loading (bool): Whether to load the entire dataset into memory on
+            instantiation or lazily when a batch is requested. Default: True
+        compress (bool): Whether to compress the cache. This can save a lot of disk space.
+            However, it can be slower to load. It is advised to only turn this off if speed
+            is noticeably improved. Default: True
+        block_size (int): The number of samples to store in a single folder. This is to avoid
+            having too many files in a single directory, which can cause performance issues.
+            Set to 0 to disable. Default: 2000
+        preloading_workers (int): The number of workers to use when preloading the dataset. Default: 10
+        samples_to_confirm_cache (int): The number of samples to check when confirming the cache. Default: 100
+    """
+
+    def __init__(
+        self,
+        dataset,
+        cache_path,
+        **kwargs,
+    ):
+        self.wrapped_dataset = DatasetPreloader(
+            dataset,
+            cache_path=cache_path,
+            **kwargs,
+        )
+
+        self.dataset = dataset
+        self.cache_path = cache_path
+        self.append_in_memory = True
+
+        self._init_cache()
+
+    def __len__(self):
+        return len(self.wrapped_dataset)
+
+    def __getitem__(self, idx):
+        dct = self.wrapped_dataset[idx]
+        dct["_idx"] = idx
+        self.load_appended_features(dct)
+
+        return dct
+
+    def _init_cache(self):
+        self.initialized = False
+        self.appended_features = {}
+        self.appended = torch.zeros(len(self.wrapped_dataset), dtype=torch.bool)
+
+    def load_appended_features(self, dct):
+        if self._is_fully_cached():
+            idx = dct["_idx"]
+            self._read_from_cache(idx, dct)
+
+    def _is_fully_cached(self):
+        print("Checking if fully cached")
+        print(self.appended.sum(), len(self.wrapped_dataset))
+        return self.appended.sum() == len(self.wrapped_dataset)
+
+    def _read_from_cache(self, idx, dct):
+        if self.append_in_memory:
+            for k in self.appended_features.keys():
+                dct[k] = self.appended_features[k][idx]
+        else:
+            raise NotImplementedError("Caching appended to disk not implemented yet.")
+
+    def append_features(self, dct, features):
+        # If idx is not iterable, make it iterable by wrapping it in a list
+        idxes = dct["_idx"]
+
+        if not isinstance(idxes, Iterable):
+            idxes = [idxes]
+        else:
+            idxes = idxes.flatten().tolist()
+
+        if not self.initialized:
+            for k in features.keys():
+                self.appended_features[k] = torch.zeros(
+                    len(self.wrapped_dataset), *(features[k].shape[1:])
+                )
+            self.initialized = True
+
+        for f_idx, idx in enumerate(idxes):
+            if self.appended[idx]:
+                continue
+            for k in features.keys():
+                self.appended_features[k][idx] = features[k][f_idx]
+
+            self.appended[idx] = True
