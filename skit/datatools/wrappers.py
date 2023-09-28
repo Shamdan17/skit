@@ -130,8 +130,8 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
     def _load_cache(self):
         dataset_len = len(self.dataset)
-        with only_on_master():
-            if not os.path.exists(self.cache_path):
+        with only_on_master() as is_main:
+            if is_main and not os.path.exists(self.cache_path):
                 os.makedirs(self.cache_path)
         if self.block_size > 0:
             cache_len = sum(
@@ -142,7 +142,10 @@ class DatasetPreloader(torch.utils.data.Dataset):
         else:
             cache_len = len(os.listdir(self.cache_path))
 
-        with only_on_master():
+        with only_on_master() as is_main:
+            if not is_main:
+                return
+
             if cache_len != dataset_len:
                 print("Cache not found, creating cache")
 

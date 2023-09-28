@@ -52,21 +52,13 @@ def barrier():
         dist.barrier()
 
 
-class NotMasterException(Exception):
-    """Dummy exception to be raised when the current process is not the master process"""
-
-
 class only_on_master:
     def __init__(self):
         pass
 
     def __enter__(self):
-        if not is_main_process():
-            raise NotMasterException()
+        return is_main_process()
 
     def __exit__(self, exc_type, exc_value, traceback):
         barrier()
-        if exc_type is NotMasterException:
-            return True
-        print("Exception type: {}".format(exc_type))
         return False  # To re-raise the exception if it's not a NotMasterException
