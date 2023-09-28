@@ -536,7 +536,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
         print("Syncing wrapper state across processes")
 
-        appended_array = self.appended.to("cuda").clone()
+        appended_array = self.appended.to("cuda").clone().to(torch.int)
 
         all_appended_arrays = [
             torch.zeros_like(appended_array) for _ in range(world_size)
