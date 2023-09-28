@@ -45,3 +45,27 @@ def is_main_process():
 def save_on_master(*args, **kwargs):
     if is_main_process():
         torch.save(*args, **kwargs)
+
+
+def barrier():
+    if is_dist_avail_and_initialized():
+        dist.barrier()
+
+
+class NotMasterException(Exception):
+    """Dummy exception to be raised when the current process is not the master process"""
+
+
+class only_on_master:
+    def __init__(self):
+        pass
+
+    def __enter__(self):
+        if not is_main_process():
+            raise NotMasterException()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        barrier()
+        if exc_type is NotMasterException:
+            return True
+        return False  # To re-raise the exception if it's not a NotMasterException

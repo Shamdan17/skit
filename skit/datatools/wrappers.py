@@ -16,6 +16,8 @@ from skit.distributed import (
     is_main_process,
     is_dist_avail_and_initialized,
     get_world_size,
+    barrier,
+    only_on_master,
 )
 
 
@@ -128,8 +130,9 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
     def _load_cache(self):
         dataset_len = len(self.dataset)
-        if not os.path.exists(self.cache_path):
-            os.makedirs(self.cache_path)
+        with only_on_master():
+            if not os.path.exists(self.cache_path):
+                os.makedirs(self.cache_path)
         if self.block_size > 0:
             cache_len = sum(
                 len(os.listdir(os.path.join(self.cache_path, x)))
@@ -139,85 +142,86 @@ class DatasetPreloader(torch.utils.data.Dataset):
         else:
             cache_len = len(os.listdir(self.cache_path))
 
-        if cache_len != dataset_len:
-            print("Cache not found, creating cache")
+        with only_on_master():
+            if cache_len != dataset_len:
+                print("Cache not found, creating cache")
 
-            # Use a dataloader to have multiple workers
-            if self.pre_load:
-                loader = torch.utils.data.DataLoader(
-                    self.dataset,
-                    batch_size=None,
-                    num_workers=self.preloading_workers,
-                    shuffle=False,
-                )
-
-                for idx, data in enumerate(tqdm(loader, desc="Preloading Data")):
-                    if self.compress:
-                        np.savez_compressed(
-                            os.path.join(self.cache_path, f"{idx:0>6}.npz"),
-                            **self._wrap_data(data),
+                # Use a dataloader to have multiple workers
+                    if self.pre_load:
+                        loader = torch.utils.data.DataLoader(
+                            self.dataset,
+                            batch_size=None,
+                            num_workers=self.preloading_workers,
+                            shuffle=False,
                         )
-                    else:
-                        np.savez(
-                            os.path.join(self.cache_path, f"{idx:0>6}.npz"),
-                            **self._wrap_data(data),
-                        )
-        else:
-            # Randomly sample samples_to_confirm_cache elements from the dataset, check if they match the cache
-            els = np.random.choice(
-                dataset_len,
-                min(dataset_len, self.samples_to_confirm_cache),
-                replace=False,
-            )
 
-            invalid_cache = False
-
-            for i in els:
-                if not self._iscached(i):
-                    continue
-                cached = self._read_from_cache(i)
-                data = self.dataset[i]
-
-                for k in data.keys():
-                    if isinstance(data[k], np.ndarray):
-                        if not (k in cached and np.allclose(data[k], cached[k])):
-                            print(
-                                "Cache mismatch at key {}, expected: {}, found: {} overwriting cache".format(
-                                    k, data[k], cached[k]
+                        for idx, data in enumerate(tqdm(loader, desc="Preloading Data")):
+                            if self.compress:
+                                np.savez_compressed(
+                                    os.path.join(self.cache_path, f"{idx:0>6}.npz"),
+                                    **self._wrap_data(data),
                                 )
-                            )
-                            torch.save(
-                                {
-                                    "expected": data[k],
-                                    "found": cached[k],
-                                },
-                                os.path.join(
-                                    self.cache_path, f"cache_mismatch_{k}_{i}.pt"
-                                ),
-                            )
-                            invalid_cache = True
-                            break
-
-                if invalid_cache:
-                    break
-
-            if invalid_cache or self.wipe_cache:
-                # Ask user for manual permission by entering Y before proceeding
-                # Even if the user enters Y, the cache will not be deleted if the cache path is not a subdirectory of the current working directory
-                confirmation = input(
-                    f"Confirm deletion of cache dir at: {self.cache_path}. [y/N]"
+                            else:
+                                np.savez(
+                                    os.path.join(self.cache_path, f"{idx:0>6}.npz"),
+                                    **self._wrap_data(data),
+                                )
+            else:
+                # Randomly sample samples_to_confirm_cache elements from the dataset, check if they match the cache
+                els = np.random.choice(
+                    dataset_len,
+                    min(dataset_len, self.samples_to_confirm_cache),
+                    replace=False,
                 )
 
-                if (
-                    os.path.abspath(self.cache_path).startswith(
-                        os.path.abspath(os.getcwd())
+                invalid_cache = False
+
+                for i in els:
+                    if not self._iscached(i):
+                        continue
+                    cached = self._read_from_cache(i)
+                    data = self.dataset[i]
+
+                    for k in data.keys():
+                        if isinstance(data[k], np.ndarray):
+                            if not (k in cached and np.allclose(data[k], cached[k])):
+                                print(
+                                    "Cache mismatch at key {}, expected: {}, found: {} overwriting cache".format(
+                                        k, data[k], cached[k]
+                                    )
+                                )
+                                torch.save(
+                                    {
+                                        "expected": data[k],
+                                        "found": cached[k],
+                                    },
+                                    os.path.join(
+                                        self.cache_path, f"cache_mismatch_{k}_{i}.pt"
+                                    ),
+                                )
+                                invalid_cache = True
+                                break
+
+                    if invalid_cache:
+                        break
+
+                if invalid_cache or self.wipe_cache:
+                    # Ask user for manual permission by entering Y before proceeding
+                    # Even if the user enters Y, the cache will not be deleted if the cache path is not a subdirectory of the current working directory
+                    confirmation = input(
+                        f"Confirm deletion of cache dir at: {self.cache_path}. [y/N]"
                     )
-                    and confirmation.lower() == "y"
-                ):
-                    shutil.rmtree(self.cache_path)
-                else:
-                    print("Cache not deleted, exiting. Please delete cache manually.")
-                    exit(1)
+
+                    if (
+                        os.path.abspath(self.cache_path).startswith(
+                            os.path.abspath(os.getcwd())
+                        )
+                        and confirmation.lower() == "y"
+                    ):
+                        shutil.rmtree(self.cache_path)
+                    else:
+                        print("Cache not deleted, exiting. Please delete cache manually.")
+                        exit(1)
 
     def save_state(self):
         pass
