@@ -19,6 +19,7 @@ from skit.distributed import (
     barrier,
     only_on_master,
 )
+import torch.distributed as dist
 
 
 class DatasetPreloader(torch.utils.data.Dataset):
