@@ -83,15 +83,10 @@ class DatasetPreloader(torch.utils.data.Dataset):
         if self._iscached(idx):
             try:
                 return self._read_from_cache(idx)
-            except BadZipFile:
+            except (BadZipFile, ValueError, EOFError) as e:
+                error_type = type(e).__name__
                 print(
-                    f"Cache file at {self._get_idx_path(idx)} is corrupted and raised a BadZipFile error. Deleting and reloading."
-                )
-                os.remove(self._get_idx_path(idx))
-                return self.__getitem__(idx)
-            except ValueError:
-                print(
-                    f"Cache file at {self._get_idx_path(idx)} is corrupted and raised a ValueError. Deleting and reloading."
+                    f"Cache file at {self._get_idx_path(idx)} is corrupted and raised a {error_type} error. Deleting and reloading."
                 )
                 os.remove(self._get_idx_path(idx))
                 return self.__getitem__(idx)
@@ -238,6 +233,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
     def infer_dataset_type(self):
         instance = self.dataset[0]
+        self.expected_len = len(instance)
 
         if isinstance(instance, dict):
             self.dtype = "dict"
@@ -251,6 +247,8 @@ class DatasetPreloader(torch.utils.data.Dataset):
             )
 
     def _unwrap_data(self, data):
+        if len(data) != self.expected_len:
+            raise ValueError
         if self.dtype == "dict":
             return {k: v for k, v in data.items()}
         elif self.dtype == "tuple":
