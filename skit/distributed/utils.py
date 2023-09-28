@@ -68,4 +68,5 @@ class only_on_master:
         barrier()
         if exc_type is NotMasterException:
             return True
+        print("Exception type: {}".format(exc_type))
         return False  # To re-raise the exception if it's not a NotMasterException
