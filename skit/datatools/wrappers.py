@@ -523,6 +523,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         # Called if there are multiple processes in order to sync the state across processes
         if not is_dist_avail_and_initialized():
             print("Not in distributed mode, skipping sync.")
+            return
 
         full_cached = self._is_fully_cached()
 
@@ -534,6 +535,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
         if fully_cached_tensor.item():
             print("Dataset is fully cached, skipping sync.")
+            return
 
         world_size = get_world_size()
 
@@ -576,11 +578,12 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         # For now, just sync everything
 
         for k in self.appended_features.keys():
+            appended_feature_cda = self.appended_features[k].to("cuda")
             all_appended_features = [
-                torch.zeros_like(self.appended_features[k]) for _ in range(world_size)
+                torch.zeros_like(appended_feature_cda) for _ in range(world_size)
             ]
 
-            dist.all_gather(all_appended_features, self.appended_features[k])
+            dist.all_gather(all_appended_features, appended_feature_cda)
 
             all_appended_features = torch.stack(all_appended_features)
 
