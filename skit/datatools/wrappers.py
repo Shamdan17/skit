@@ -479,7 +479,9 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         if not self.initialized:
             for k in features.keys():
                 self.appended_features[k] = torch.zeros(
-                    len(self.wrapped_dataset), *(features[k].shape[1:])
+                    len(self.wrapped_dataset),
+                    *(features[k].shape[1:]),
+                    dtype=features[k].dtype,
                 )
                 self.appended_features[k].share_memory_()
             self.initialized = True
