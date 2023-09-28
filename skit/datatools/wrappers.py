@@ -555,7 +555,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         new_data_appended = new_appended_array & ~appended_array
 
         new_data_found = torch.tensor(
-            [(new_data_appended).sum() > 0], dtype=torch.bool
+            [(new_data_appended).sum() > 0], dtype=torch.int
         ).to("cuda")
 
         dist.all_reduce(new_data_found, op=dist.ReduceOp.MAX)
@@ -564,7 +564,9 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
             print("No new data found, skipping sync.")
             return
 
-        new_data_appended = dist.all_reduce(new_data_appended, op=dist.ReduceOp.MAX)
+        # new_data_appended = new_data_appended.to(torch.int)
+
+        # new_data_appended = dist.all_reduce(new_data_appended, op=dist.ReduceOp.MAX)
 
         # indices_of_interest = torch.nonzero(new_data_appended).flatten()
         # TODO: only sync indices of interest
