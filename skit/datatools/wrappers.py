@@ -12,6 +12,11 @@ import torch
 from tqdm import tqdm
 from zipfile import BadZipFile
 from collections.abc import Iterable
+from skit.distributed import (
+    is_main_process,
+    is_dist_avail_and_initialized,
+    get_world_size,
+)
 
 
 class DatasetPreloader(torch.utils.data.Dataset):
@@ -174,13 +179,22 @@ class DatasetPreloader(torch.utils.data.Dataset):
                 data = self.dataset[i]
 
                 for k in data.keys():
-                    if isinstance(data[k], torch.Tensor):
-                        data[k] = data[k].numpy()
-
-                for k in data.keys():
                     if isinstance(data[k], np.ndarray):
-                        if k in cached or not np.allclose(data[k], cached[k]):
-                            print("Cache mismatch, overwriting cache")
+                        if not (k in cached and np.allclose(data[k], cached[k])):
+                            print(
+                                "Cache mismatch at key {}, expected: {}, found: {} overwriting cache".format(
+                                    k, data[k], cached[k]
+                                )
+                            )
+                            torch.save(
+                                {
+                                    "expected": data[k],
+                                    "found": cached[k],
+                                },
+                                os.path.join(
+                                    self.cache_path, f"cache_mismatch_{k}_{i}.pt"
+                                ),
+                            )
                             invalid_cache = True
                             break
 
@@ -327,7 +341,7 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
         if cached_count > self.cached_count:
             print("Cache update detected, saving updated state.")
             self.cached_count = cached_count
-            torch.save(
+            save_on_master(
                 {"cached": self.cached, "cache": self.cache},
                 os.path.join(self.cache_path, "wrapper_state.pt"),
             )
@@ -389,6 +403,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         self,
         dataset,
         cache_path,
+        augmented_cache_filename=None,
         **kwargs,
     ):
         self.wrapped_dataset = DatasetPreloader(
@@ -400,6 +415,10 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         self.dataset = dataset
         self.cache_path = cache_path
         self.append_in_memory = True
+        print("Initializing cache", self.cache_path, augmented_cache_filename)
+        self.augmented_cache_filename = os.path.join(
+            self.cache_path, augmented_cache_filename
+        )
 
         self._init_cache()
 
@@ -417,6 +436,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         self.initialized = False
         self.appended_features = {}
         self.appended = torch.zeros(len(self.wrapped_dataset), dtype=torch.bool)
+        self.appended.share_memory_()
 
     def load_appended_features(self, dct):
         if self._is_fully_cached():
@@ -424,8 +444,8 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
             self._read_from_cache(idx, dct)
 
     def _is_fully_cached(self):
-        print("Checking if fully cached")
-        print(self.appended.sum(), len(self.wrapped_dataset))
+        # print("Checking if fully cached")
+        # print(self.appended.sum(), len(self.wrapped_dataset))
         return self.appended.sum() == len(self.wrapped_dataset)
 
     def _read_from_cache(self, idx, dct):
@@ -444,11 +464,14 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         else:
             idxes = idxes.flatten().tolist()
 
+        features = {k: v.cpu() for k, v in features.items() if not k.startswith("_")}
+
         if not self.initialized:
             for k in features.keys():
                 self.appended_features[k] = torch.zeros(
                     len(self.wrapped_dataset), *(features[k].shape[1:])
                 )
+                self.appended_features[k].share_memory_()
             self.initialized = True
 
         for f_idx, idx in enumerate(idxes):
@@ -458,3 +481,106 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
                 self.appended_features[k][idx] = features[k][f_idx]
 
             self.appended[idx] = True
+
+    def save_state(self):
+        self.wrapped_dataset.save_state()
+        if self.append_in_memory:
+            save_on_master(
+                {
+                    "appended_features": self.appended_features,
+                    "appended": self.appended,
+                },
+                self.augmented_cache_filename,
+            )
+        else:
+            raise NotImplementedError("Caching appended to disk not implemented yet.")
+
+    def load_state(self):
+        self.wrapped_dataset.load_state()
+        if self.append_in_memory:
+            if os.path.exists(self.augmented_cache_filename):
+                state = torch.load(self.augmented_cache_filename)
+                self.appended_features = state["appended_features"]
+                self.appended = state["appended"]
+                for k in self.appended_features.keys():
+                    self.appended_features[k].share_memory_()
+                self.appended.share_memory_()
+
+    def sync_state(self):
+        # Called if there are multiple processes in order to sync the state across processes
+        if not is_dist_avail_and_initialized():
+            print("Not in distributed mode, skipping sync.")
+
+        full_cached = self._is_fully_cached()
+
+        fully_cached_tensor = torch.tensor(
+            [full_cached], dtype=torch.bool, device="cuda"
+        )
+
+        dist.all_reduce(fully_cached_tensor, op=dist.ReduceOp.PRODUCT)
+
+        if fully_cached_tensor.item():
+            print("Dataset is fully cached, skipping sync.")
+
+        world_size = get_world_size()
+
+        print("Syncing wrapper state across processes")
+
+        appended_array = self.appended.to("cuda").clone()
+
+        all_appended_arrays = [
+            torch.zeros_like(appended_array) for _ in range(world_size)
+        ]
+
+        dist.all_gather(all_appended_arrays, appended_array, async_op=False)
+
+        all_appended_arrays = torch.stack(
+            all_appended_arrays
+        )  # world_size x len(self.wrapped_dataset)
+
+        new_appended_array = all_appended_arrays.sum(dim=0) > 0
+
+        new_appended_where = torch.argmax(all_appended_arrays, dim=0, keepdim=True)  #
+
+        new_data_appended = new_appended_array & ~appended_array
+
+        new_data_found = torch.tensor(
+            [(new_data_appended).sum() > 0], dtype=torch.bool
+        ).to("cuda")
+
+        dist.all_reduce(new_data_found, op=dist.ReduceOp.MAX)
+
+        if not new_data_found.item():
+            print("No new data found, skipping sync.")
+            return
+
+        new_data_appended = dist.all_reduce(new_data_appended, op=dist.ReduceOp.MAX)
+
+        # indices_of_interest = torch.nonzero(new_data_appended).flatten()
+        # TODO: only sync indices of interest
+        # For now, just sync everything
+
+        for k in self.appended_features.keys():
+            all_appended_features = [
+                torch.zeros_like(self.appended_features[k]) for _ in range(world_size)
+            ]
+
+            dist.all_gather(all_appended_features, self.appended_features[k])
+
+            all_appended_features = torch.stack(all_appended_features)
+
+            new_feature_value = torch.gather(
+                all_appended_features, 0, new_appended_where
+            )
+
+            self.appended_features[k] = new_feature_value.cpu()
+
+            self.appended_features[k].share_memory_()
+
+        self.appended = new_appended_array.cpu()
+        self.appended.share_memory_()
+
+        print("Syncing finished, total appended:", self.appended.sum())
+
+    def __getattr__(self, name):
+        return getattr(self.wrapped_dataset, name)
