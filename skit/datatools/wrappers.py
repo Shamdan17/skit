@@ -147,25 +147,25 @@ class DatasetPreloader(torch.utils.data.Dataset):
                 print("Cache not found, creating cache")
 
                 # Use a dataloader to have multiple workers
-                    if self.pre_load:
-                        loader = torch.utils.data.DataLoader(
-                            self.dataset,
-                            batch_size=None,
-                            num_workers=self.preloading_workers,
-                            shuffle=False,
-                        )
+                if self.pre_load:
+                    loader = torch.utils.data.DataLoader(
+                        self.dataset,
+                        batch_size=None,
+                        num_workers=self.preloading_workers,
+                        shuffle=False,
+                    )
 
-                        for idx, data in enumerate(tqdm(loader, desc="Preloading Data")):
-                            if self.compress:
-                                np.savez_compressed(
-                                    os.path.join(self.cache_path, f"{idx:0>6}.npz"),
-                                    **self._wrap_data(data),
-                                )
-                            else:
-                                np.savez(
-                                    os.path.join(self.cache_path, f"{idx:0>6}.npz"),
-                                    **self._wrap_data(data),
-                                )
+                    for idx, data in enumerate(tqdm(loader, desc="Preloading Data")):
+                        if self.compress:
+                            np.savez_compressed(
+                                os.path.join(self.cache_path, f"{idx:0>6}.npz"),
+                                **self._wrap_data(data),
+                            )
+                        else:
+                            np.savez(
+                                os.path.join(self.cache_path, f"{idx:0>6}.npz"),
+                                **self._wrap_data(data),
+                            )
             else:
                 # Randomly sample samples_to_confirm_cache elements from the dataset, check if they match the cache
                 els = np.random.choice(
@@ -220,7 +220,9 @@ class DatasetPreloader(torch.utils.data.Dataset):
                     ):
                         shutil.rmtree(self.cache_path)
                     else:
-                        print("Cache not deleted, exiting. Please delete cache manually.")
+                        print(
+                            "Cache not deleted, exiting. Please delete cache manually."
+                        )
                         exit(1)
 
     def save_state(self):
