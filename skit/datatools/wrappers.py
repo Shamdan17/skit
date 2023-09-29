@@ -612,8 +612,15 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
             all_appended_features = torch.stack(all_appended_features)
 
+            num_dims = len(all_appended_features.shape) - 1
+            new_appended_where_cur = new_appended_where
+            for _ in range(num_dims):
+                new_appended_where_cur = new_appended_where_cur.unsqueeze(-1)
+
             new_feature_value = torch.gather(
-                all_appended_features, 0, new_appended_where
+                all_appended_features,
+                0,
+                new_appended_where_cur.expand(-1, *all_appended_features.shape[1:]),
             )
 
             self.appended_features[k] = new_feature_value.cpu()
