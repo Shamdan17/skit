@@ -13,14 +13,13 @@ from tqdm import tqdm
 from zipfile import BadZipFile
 from collections.abc import Iterable
 from skit.distributed import (
-    is_main_process,
     is_dist_avail_and_initialized,
     get_world_size,
-    barrier,
     only_on_master,
     save_on_master,
 )
 import torch.distributed as dist
+import time
 
 
 class DatasetPreloader(torch.utils.data.Dataset):
@@ -326,15 +325,15 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         if self._iscached(idx):
             return self._read_from_cache(idx)
-        else:
-            el = self.dataset[idx]
-            el = torch.utils.data._utils.collate.default_convert(el)
-            el_wrapped = self.dataset._wrap_data(el)
-            for k in el_wrapped.keys():
-                self.cache[k][idx] = el_wrapped[k]
-            self.cached[idx] = True
 
-            return el
+        el = self.dataset[idx]
+        el = torch.utils.data._utils.collate.default_convert(el)
+        el_wrapped = self.dataset._wrap_data(el)
+        for k in el_wrapped.keys():
+            self.cache[k][idx] = el_wrapped[k]
+        self.cached[idx] = True
+
+        return el
 
     def __len__(self):
         return len(self.dataset)
