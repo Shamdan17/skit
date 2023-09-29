@@ -522,6 +522,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
     def save_state(self):
         self.wrapped_dataset.save_state()
+        self.sync_state()
         if self.append_in_memory:
             save_on_master(
                 {
@@ -623,7 +624,9 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
                 new_appended_where_cur.expand(-1, *all_appended_features.shape[1:]),
             )
 
-            self.appended_features[k] = new_feature_value.cpu()
+            print(self.append_features[k].shape)
+            self.appended_features[k] = new_feature_value[0].cpu()
+            print(self.append_features[k].shape)
 
             self.appended_features[k].share_memory_()
 
