@@ -95,16 +95,18 @@ class DatasetPreloader(torch.utils.data.Dataset):
             save_path = self._get_idx_path(idx)
             if not os.path.exists(os.path.dirname(save_path)):
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            tmp_save_path = self._get_idx_tmp_path(idx)
             if self.compress:
                 np.savez_compressed(
-                    self._get_idx_path(idx),
+                    tmp_save_path,
                     **self._wrap_data(el),
                 )
             else:
                 np.savez(
-                    self._get_idx_path(idx),
+                    tmp_save_path,
                     **self._wrap_data(el),
                 )
+            os.rename(tmp_save_path, save_path)
             return el
 
     def _read_from_cache(self, idx):
@@ -122,14 +124,39 @@ class DatasetPreloader(torch.utils.data.Dataset):
             block_idx = ""
         return os.path.join(self.cache_path, block_idx, f"{idx:0>6}.npz")
 
+    def _get_idx_tmp_path(self, idx):
+        if self.block_size > 0:
+            block_idx = f"{idx // self.block_size}"
+        else:
+            block_idx = ""
+        # Get current time
+        timestamp = str(time.time())[-4:]
+        return os.path.join(
+            self.cache_path, block_idx, f"tmp.{timestamp}.{idx:0>6}.npz"
+        )
+
     def _iscached(self, idx):
         return os.path.exists(self._get_idx_path(idx))
+
+    def _clear_tmp_files(self):
+        if self.block_size > 0:
+            blocks = os.listdir(self.cache_path)
+        else:
+            blocks = [""]
+        for block in blocks:
+            if not os.path.isdir(os.path.join(self.cache_path, block)):
+                continue
+            for f in os.listdir(os.path.join(self.cache_path, block)):
+                if f.startswith("tmp"):
+                    os.remove(os.path.join(self.cache_path, block, f))
 
     def _load_cache(self):
         dataset_len = len(self.dataset)
         with only_on_master() as is_main:
             if is_main and not os.path.exists(self.cache_path):
                 os.makedirs(self.cache_path)
+            else:
+                self._clear_tmp_files()
         if self.block_size > 0:
             cache_len = sum(
                 len(os.listdir(os.path.join(self.cache_path, x)))
