@@ -612,7 +612,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
             all_appended_features = torch.stack(all_appended_features)
 
-            num_dims = len(all_appended_features.shape) - 1
+            num_dims = len(all_appended_features.shape) - 2
             new_appended_where_cur = new_appended_where
             for _ in range(num_dims):
                 new_appended_where_cur = new_appended_where_cur.unsqueeze(-1)
