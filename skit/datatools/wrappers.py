@@ -17,7 +17,11 @@ from skit.distributed import (
     get_world_size,
     only_on_master,
     save_on_master,
+    barrier,
+    get_rank,
 )
+from skit.utils import get_dtype_min_value
+from skit.memory import MemStats
 import torch.distributed as dist
 import time
 
@@ -248,7 +252,9 @@ class DatasetPreloader(torch.utils.data.Dataset):
                         shutil.rmtree(self.cache_path)
                     else:
                         print(
-                            "Cache not deleted, exiting. Please delete cache manually."
+                            "Cache not deleted, exiting. Please delete cache manually.",
+                            "\nCache path:",
+                            self.cache_path,
                         )
                         exit(1)
 
@@ -551,11 +557,13 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
             print("Not in distributed mode, skipping sync.")
             return
 
+        assert (
+            torch.distributed.is_gloo_available()
+        ), "Gloo backend is required for syncing in this version. Please initialize the process group with gloo backend in addition to the NCCL backend"
+
         full_cached = self._is_fully_cached()
 
-        fully_cached_tensor = torch.tensor(
-            [full_cached], dtype=torch.bool, device="cuda"
-        )
+        fully_cached_tensor = torch.tensor([full_cached], dtype=torch.int)
 
         dist.all_reduce(fully_cached_tensor, op=dist.ReduceOp.PRODUCT)
 
@@ -565,9 +573,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
         world_size = get_world_size()
 
-        print("Syncing wrapper state across processes")
-
-        appended_array = self.appended.to("cuda").clone().to(torch.int)
+        appended_array = self.appended.clone().to(torch.int)
 
         all_appended_arrays = [
             torch.zeros_like(appended_array) for _ in range(world_size)
@@ -581,13 +587,13 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
         new_appended_array = all_appended_arrays.sum(dim=0) > 0
 
-        new_appended_where = torch.argmax(all_appended_arrays, dim=0, keepdim=True)  #
+        new_appended_where = torch.argmax(all_appended_arrays, dim=0)  #
+
+        new_appended_in_this_process = new_appended_where == get_rank()
 
         new_data_appended = new_appended_array & ~appended_array
 
-        new_data_found = torch.tensor(
-            [(new_data_appended).sum() > 0], dtype=torch.int
-        ).to("cuda")
+        new_data_found = torch.tensor([(new_data_appended).sum() > 0], dtype=torch.int)
 
         dist.all_reduce(new_data_found, op=dist.ReduceOp.MAX)
 
@@ -595,45 +601,37 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
             print("No new data found, skipping sync.")
             return
 
+        # TODO: only sync indices of interest, target for version 0.3.0
         # new_data_appended = new_data_appended.to(torch.int)
 
         # new_data_appended = dist.all_reduce(new_data_appended, op=dist.ReduceOp.MAX)
 
         # indices_of_interest = torch.nonzero(new_data_appended).flatten()
-        # TODO: only sync indices of interest
         # For now, just sync everything
+        # Print current cuda used memory in GB
 
         for k in self.appended_features.keys():
-            appended_feature_cda = self.appended_features[k].to("cuda")
-            all_appended_features = [
-                torch.zeros_like(appended_feature_cda) for _ in range(world_size)
-            ]
+            appended_feature_cda = self.appended_features[k].cuda()
 
-            dist.all_gather(all_appended_features, appended_feature_cda)
-
-            all_appended_features = torch.stack(all_appended_features)
-
-            num_dims = len(all_appended_features.shape) - 2
-            new_appended_where_cur = new_appended_where
-            for _ in range(num_dims):
-                new_appended_where_cur = new_appended_where_cur.unsqueeze(-1)
-
-            new_feature_value = torch.gather(
-                all_appended_features,
-                0,
-                new_appended_where_cur.expand(-1, *all_appended_features.shape[1:]),
+            # Make all features not in this process the minimum value possible in order to use max reduction
+            appended_feature_cda[~new_appended_in_this_process] = get_dtype_min_value(
+                appended_feature_cda.dtype
             )
+            dist.all_reduce(appended_feature_cda, op=dist.ReduceOp.MAX)
 
-            print(self.appended_features[k].shape)
-            self.appended_features[k] = new_feature_value[0].cpu()
-            print(self.appended_features[k].shape)
+            # Assert that none of the features are the minimum value
+            assert appended_feature_cda.min() != get_dtype_min_value(
+                appended_feature_cda.dtype
+            ), "Critical error, some features are still undefined after sync."
 
+            self.appended_features[k] = appended_feature_cda.cpu()
             self.appended_features[k].share_memory_()
+            del appended_feature_cda
 
         self.appended = new_appended_array.cpu()
         self.appended.share_memory_()
 
-        print("Syncing finished, total appended:", self.appended.sum())
+        print("Syncing finished, total appended:", self.appended.sum().item())
 
     def __getattr__(self, name):
         return getattr(self.wrapped_dataset, name)
