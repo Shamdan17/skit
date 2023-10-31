@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="skit",
-    version="0.1.0",
+    version="0.2.0",
     author="Shadi Hamdan et al.",
     author_email="shamdan17@ku.edu.tr",
     description="Shadi's Toolkit",
