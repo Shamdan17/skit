@@ -538,9 +538,15 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         self.wrapped_dataset.load_state()
         if self.append_in_memory:
             if os.path.exists(self.augmented_cache_filename):
+                print("Loading augmented cache from", self.augmented_cache_filename)
                 state = torch.load(self.augmented_cache_filename)
                 self.appended_features = state["appended_features"]
                 self.appended = state["appended"]
+                print(
+                    "Number augmented features cached: {}/{}",
+                    self.appended.sum(),
+                    len(self.appended),
+                )
                 for k in self.appended_features.keys():
                     self.appended_features[k].share_memory_()
                 self.appended.share_memory_()
@@ -623,6 +629,8 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
                 0,
                 new_appended_where_cur.expand(-1, *all_appended_features.shape[1:]),
             )
+
+            del self.appended_features[k]
 
             print(self.appended_features[k].shape)
             self.appended_features[k] = new_feature_value[0].cpu()
