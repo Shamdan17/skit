@@ -21,7 +21,6 @@ from skit.distributed import (
     get_rank,
 )
 from skit.utils import get_dtype_min_value
-from skit.memory import MemStats
 import torch.distributed as dist
 import time
 
