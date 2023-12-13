@@ -39,7 +39,6 @@ def get_rank():
 
 
 def is_main_process():
-    print(get_rank())
     return get_rank() == 0
 
 
@@ -66,7 +65,12 @@ class only_on_master:
 
 
 def check_parameter_consistency(
-    model, summary_only=True, return_diffs=False, verbose=False, summary_rows=10
+    model,
+    summary_only=True,
+    return_diffs=False,
+    verbose=False,
+    summary_rows=10,
+    skip_if_grad_found=True,
 ):
     """
     This function checks if all the parameters across all processes are the same
@@ -81,8 +85,13 @@ def check_parameter_consistency(
 
     # To store the l2 norm of the differences
     l2_diffs = []
+    any_contains_grad = False
 
     for name, param in model.named_parameters():
+        if skip_if_grad_found and param.grad is not None:
+            any_contains_grad = True
+            barrier()
+            return True
         tensor = param.data
         tensor_list = [torch.zeros_like(tensor) for _ in range(world_size)]
         dist.all_gather(tensor_list, tensor)
@@ -108,34 +117,43 @@ def check_parameter_consistency(
                 l2_diffs.append((l2_norm, name, 0, i))
                 consistent = False
 
+    widths = [25, 16, 25]
+
     if summary_only and is_main_process() and not consistent:
         print(
             "Found inconsistent parameters across processes. "
             "This is expected if you are running distributed training with different batch sizes."
         )
+        min_param_width = min([len(x[1]) for x in l2_diffs])
+        widths[0] = max(widths[0], min_param_width)
+        table_width = sum(widths) + 4
         # Pretty print as follows:
         # ----------------------------------------------------------------
         # |     Parameter     | Ranks compared |  L2 norm of difference  |
         # Widths are 19, 16, and 25 characters respectively
         # We center the text in the middle of the width
         # Also, sort by l2 norm of difference, descending. Only print summary_rows
-        print("-" * 64)
+        print("-" * table_width)
         print(
-            "|{:^19}|{:^16}|{:^25}|".format(
-                "Parameter", "Ranks compared", "L2 norm of difference"
+            "|{}|{}|{}|".format(
+                "Parameter".center(widths[0]),
+                "Ranks compared".center(widths[1]),
+                "L2 norm of difference".center(widths[2]),
             )
         )
-        print("-" * 64)
+        print("-" * table_width)
         l2_diffs.sort(key=lambda x: x[0], reverse=True)
         for i in range(min(len(l2_diffs), summary_rows)):
             print(
-                "|{:^19}|{:^16}|{:^25.4e}|".format(
-                    l2_diffs[i][1],
-                    "{} <-> {}".format(l2_diffs[i][2], l2_diffs[i][3]),
-                    l2_diffs[i][0],
+                "|{}|{}||".format(
+                    l2_diffs[i][1].center(widths[0]),
+                    "{} <-> {}".format(l2_diffs[i][2], l2_diffs[i][3]).center(
+                        widths[1]
+                    ),
+                    f"{l2_diffs[i][0]:.4e}".center(widths[2]),
                 )
             )
-        print("-" * 64)
+        print("-" * table_width)
 
     barrier()
     return consistent
