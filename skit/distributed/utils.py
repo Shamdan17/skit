@@ -39,6 +39,7 @@ def get_rank():
 
 
 def is_main_process():
+    print(get_rank())
     return get_rank() == 0
 
 
@@ -62,3 +63,79 @@ class only_on_master:
     def __exit__(self, exc_type, exc_value, traceback):
         barrier()
         return False  # To re-raise the exception if it's not a NotMasterException
+
+
+def check_parameter_consistency(
+    model, summary_only=True, return_diffs=False, verbose=False, summary_rows=10
+):
+    """
+    This function checks if all the parameters across all processes are the same
+    Only do this on main process
+    """
+    if not is_dist_avail_and_initialized():
+        return True
+
+    consistent = True
+
+    world_size = get_world_size()
+
+    # To store the l2 norm of the differences
+    l2_diffs = []
+
+    for name, param in model.named_parameters():
+        tensor = param.data
+        tensor_list = [torch.zeros_like(tensor) for _ in range(world_size)]
+        dist.all_gather(tensor_list, tensor)
+        if not is_main_process():
+            # We only check in main process
+            # We need the all_gather to be done in all processes because it contains a barrier
+            # Could be fixed easily probably, but I didn't bother looking too much into it.
+            continue
+        for i in range(1, world_size):
+            if not torch.equal(tensor_list[0], tensor_list[i]):
+                if verbose:
+                    print(
+                        "Rank {} and {} has inconsistent parameter {}".format(
+                            0, i, name
+                        )
+                    )
+
+                # Get l2 norm of the difference
+                diff = tensor_list[0] - tensor_list[i]
+                l2_norm = torch.norm(diff)
+                if verbose and not summary_only:
+                    print("l2 norm of difference: {:.4e}".format(l2_norm))
+                l2_diffs.append((l2_norm, name, 0, i))
+                consistent = False
+
+    if summary_only and is_main_process() and not consistent:
+        print(
+            "Found inconsistent parameters across processes. "
+            "This is expected if you are running distributed training with different batch sizes."
+        )
+        # Pretty print as follows:
+        # ----------------------------------------------------------------
+        # |     Parameter     | Ranks compared |  L2 norm of difference  |
+        # Widths are 19, 16, and 25 characters respectively
+        # We center the text in the middle of the width
+        # Also, sort by l2 norm of difference, descending. Only print summary_rows
+        print("-" * 64)
+        print(
+            "|{:^19}|{:^16}|{:^25}|".format(
+                "Parameter", "Ranks compared", "L2 norm of difference"
+            )
+        )
+        print("-" * 64)
+        l2_diffs.sort(key=lambda x: x[0], reverse=True)
+        for i in range(min(len(l2_diffs), summary_rows)):
+            print(
+                "|{:^19}|{:^16}|{:^25.4e}|".format(
+                    l2_diffs[i][1],
+                    "{} <-> {}".format(l2_diffs[i][2], l2_diffs[i][3]),
+                    l2_diffs[i][0],
+                )
+            )
+        print("-" * 64)
+
+    barrier()
+    return consistent
