@@ -145,7 +145,7 @@ def check_parameter_consistency(
         l2_diffs.sort(key=lambda x: x[0], reverse=True)
         for i in range(min(len(l2_diffs), summary_rows)):
             print(
-                "|{}|{}||".format(
+                "|{}|{}|{}|".format(
                     l2_diffs[i][1].center(widths[0]),
                     "{} <-> {}".format(l2_diffs[i][2], l2_diffs[i][3]).center(
                         widths[1]
