@@ -75,6 +75,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
         self.samples_to_confirm_cache = samples_to_confirm_cache
 
         self.infer_dataset_type()
+        print("Loading cache from", self.cache_path)
 
         self._load_cache()
 
@@ -198,6 +199,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
                             )
             else:
                 # Randomly sample samples_to_confirm_cache elements from the dataset, check if they match the cache
+                return
                 els = np.random.choice(
                     dataset_len,
                     min(dataset_len, self.samples_to_confirm_cache),
@@ -266,6 +268,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
     def infer_dataset_type(self):
         instance = self.dataset[0]
         self.expected_len = len(instance)
+        print(instance.keys(), self.expected_len)
 
         if isinstance(instance, dict):
             self.dtype = "dict"
@@ -280,6 +283,7 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
     def _unwrap_data(self, data):
         if len(data) != self.expected_len:
+            print("Invalid len", data.keys(), self.expected_len)
             raise ValueError
         if self.dtype == "dict":
             return {k: v for k, v in data.items()}
@@ -325,6 +329,7 @@ class InMemoryDatasetPreloader(torch.utils.data.Dataset):
     def __init__(self, dataset, cache_path, **kwargs):
         self.dataset = DatasetPreloader(dataset, cache_path, **kwargs)
         self.cache_path = cache_path
+        print("Initializing with cache path", self.cache_path)
         self.cached_count = 0
         self._init_cache()
 
@@ -614,8 +619,8 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         # indices_of_interest = torch.nonzero(new_data_appended).flatten()
         # For now, just sync everything
         # Print current cuda used memory in GB
-
-        for k in self.appended_features.keys():
+        keys = list(self.appended_features.keys())
+        for k in keys:
             appended_feature_cda = self.appended_features[k].cuda()
 
             # Make all features not in this process the minimum value possible in order to use max reduction
