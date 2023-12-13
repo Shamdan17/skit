@@ -124,7 +124,8 @@ def check_parameter_consistency(
             "Found inconsistent parameters across processes. "
             "This is expected if you are running distributed training with different batch sizes."
         )
-        min_param_width = max([len(x[1]) for x in l2_diffs])
+        l2_diffs.sort(key=lambda x: x[0], reverse=True)
+        min_param_width = max([len(x[1]) for x in l2_diffs[:summary_rows]])
         widths[0] = max(widths[0], min_param_width)
         table_width = sum(widths) + 4
         # Pretty print as follows:
@@ -142,7 +143,6 @@ def check_parameter_consistency(
             )
         )
         print("-" * table_width)
-        l2_diffs.sort(key=lambda x: x[0], reverse=True)
         for i in range(min(len(l2_diffs), summary_rows)):
             print(
                 "|{}|{}|{}|".format(
