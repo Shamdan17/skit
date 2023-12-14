@@ -74,10 +74,10 @@ def check_sampler_index_consistency(
     This function checks if the indices across all processes are mutually exclusive
     """
     num_indices = len(indices)
-    len_indices = torch.tensor([num_indices], dtype=torch.int64).cuda()
+    max_len_indices = torch.tensor([num_indices], dtype=torch.int64).cuda()
 
     # Get the max length of indices across all processes
-    max_len_indices = dist.all_reduce(len_indices, op=dist.ReduceOp.MAX)
+    dist.all_reduce(max_len_indices, op=dist.ReduceOp.MAX)
 
     # Pad the indices to the max length with -1
     indices = torch.tensor(indices, dtype=torch.int64).cuda()
