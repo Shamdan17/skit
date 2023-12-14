@@ -1,5 +1,6 @@
 import torch
 import torch.distributed as dist
+import numpy as np
 
 
 def disable_printing(is_master):
@@ -64,6 +65,58 @@ class only_on_master:
         return False  # To re-raise the exception if it's not a NotMasterException
 
 
+def check_sampler_index_consistency(
+    indices,
+    summary_only=True,
+    verbose=False,
+):
+    """
+    This function checks if the indices across all processes are mutually exclusive
+    """
+    num_indices = len(indices)
+    len_indices = torch.tensor([num_indices], dtype=torch.int64).cuda()
+
+    # Get the max length of indices across all processes
+    max_len_indices = dist.all_reduce(len_indices, op=dist.ReduceOp.MAX)
+
+    # Pad the indices to the max length with -1
+    indices = torch.tensor(indices, dtype=torch.int64).cuda()
+    indices = torch.cat(
+        [
+            indices,
+            torch.ones(max_len_indices - num_indices, dtype=torch.int64).cuda() * -1,
+        ],
+        dim=0,
+    )
+
+    world_size = get_world_size()
+
+    all_indices = [torch.zeros_like(indices) for _ in range(world_size)]
+    dist.all_gather(all_indices, indices)
+
+    all_indices = [x.cpu().numpy() for x in all_indices]
+
+    consistent = True
+
+    for i in range(1, world_size):
+        # Check if intersection is empty other than possibly -1
+        intersection = np.intersect1d(all_indices[0], all_indices[i])
+        if intersection[0] == -1:
+            intersection = intersection[1:]
+
+        if len(intersection) > 0:
+            if verbose:
+                print("Rank {} and {} has overlapping indices".format(0, i))
+                print("Intersection: {}".format(intersection))
+            consistent = False
+
+    if summary_only and is_main_process() and not consistent:
+        print("Found overlapping indices across processes.")
+
+    barrier()
+    return consistent
+
+
 def check_parameter_consistency(
     model,
     summary_only=True,
@@ -85,11 +138,9 @@ def check_parameter_consistency(
 
     # To store the l2 norm of the differences
     l2_diffs = []
-    any_contains_grad = False
 
     for name, param in model.named_parameters():
         if skip_if_grad_found and param.grad is not None:
-            any_contains_grad = True
             barrier()
             return True
         tensor = param.data
@@ -120,10 +171,7 @@ def check_parameter_consistency(
     widths = [25, 16, 25]
 
     if summary_only and is_main_process() and not consistent:
-        print(
-            "Found inconsistent parameters across processes. "
-            "This is expected if you are running distributed training with different batch sizes."
-        )
+        print("Found inconsistent parameters across processes. ")
         l2_diffs.sort(key=lambda x: x[0], reverse=True)
         min_param_width = max([len(x[1]) for x in l2_diffs[:summary_rows]])
         widths[0] = max(widths[0], min_param_width)
