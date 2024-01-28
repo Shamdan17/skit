@@ -116,6 +116,8 @@ class DatasetPreloader(torch.utils.data.Dataset):
         return self._unwrap_data(
             {
                 k: torch.from_numpy(v)
+                # if np.issubdtype(v.dtype, np.number)
+                # else (str(v) if np.issubdtype(v.dtype, np.str_) else v)
                 for k, v in np.load(self._get_idx_path(idx)).items()
             }
         )
@@ -268,9 +270,8 @@ class DatasetPreloader(torch.utils.data.Dataset):
     def infer_dataset_type(self):
         instance = self.dataset[0]
         self.expected_len = len(instance)
-        print(instance.keys(), self.expected_len)
-
         if isinstance(instance, dict):
+            print(instance.keys(), self.expected_len)
             self.dtype = "dict"
         elif isinstance(instance, tuple):
             self.dtype = "tuple"
@@ -283,7 +284,10 @@ class DatasetPreloader(torch.utils.data.Dataset):
 
     def _unwrap_data(self, data):
         if len(data) != self.expected_len:
-            print("Invalid len", data.keys(), self.expected_len)
+            if self.dtype == "dict":
+                print("Invalid len", data.keys(), self.expected_len)
+            else:
+                print("Invalid len", len(data), self.expected_len)
             raise ValueError
         if self.dtype == "dict":
             return {k: v for k, v in data.items()}
