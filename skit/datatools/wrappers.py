@@ -450,6 +450,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
         dataset,
         cache_path,
         augmented_cache_filename=None,
+        use_fp16=True,
         **kwargs,
     ):
         self.wrapped_dataset = DatasetPreloader(
@@ -458,6 +459,7 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
             **kwargs,
         )
 
+        self.use_fp16 = use_fp16
         self.dataset = dataset
         self.cache_path = cache_path
         self.append_in_memory = True
@@ -514,10 +516,15 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
 
         if not self.initialized:
             for k in features.keys():
+                dtype = features[k].dtype
+                if dtype in [torch.float32, torch.float64] and self.use_fp16:
+                    print("Converting", k, "to fp16")
+                    dtype = torch.float16
+
                 self.appended_features[k] = torch.zeros(
                     len(self.wrapped_dataset),
                     *(features[k].shape[1:]),
-                    dtype=features[k].dtype,
+                    dtype=dtype,
                 )
                 self.appended_features[k].share_memory_()
             self.initialized = True
@@ -526,7 +533,9 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
             if self.appended[idx]:
                 continue
             for k in features.keys():
-                self.appended_features[k][idx] = features[k][f_idx]
+                self.appended_features[k][idx] = features[k][f_idx].to(
+                    self.appended_features[k].dtype
+                )
 
             self.appended[idx] = True
 
@@ -552,10 +561,32 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
                 state = torch.load(self.augmented_cache_filename)
                 self.appended_features = state["appended_features"]
                 self.appended = state["appended"]
+                del state
+                if self.use_fp16:
+                    # Check if any appended features are float32, if so, convert to fp16
+                    must_save = False
+                    for k in self.appended_features.keys():
+                        if self.appended_features[k].dtype in [
+                            torch.float32,
+                            torch.float64,
+                        ]:
+                            print("Converting", k, "to fp16")
+                            self.appended_features[k] = self.appended_features[k].half()
+                            must_save = True
+
+                    if must_save:
+                        save_on_master(
+                            {
+                                "appended_features": self.appended_features,
+                                "appended": self.appended,
+                            },
+                            self.augmented_cache_filename,
+                        )
+
                 print(
-                    "Number augmented features cached: {}/{}",
-                    self.appended.sum(),
-                    len(self.appended),
+                    "Number augmented features cached: {}/{}".format(
+                        self.appended.sum(), len(self.appended)
+                    )
                 )
                 for k in self.appended_features.keys():
                     self.appended_features[k].share_memory_()

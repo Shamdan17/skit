@@ -101,7 +101,7 @@ def check_sampler_index_consistency(
     for i in range(1, world_size):
         # Check if intersection is empty other than possibly -1
         intersection = np.intersect1d(all_indices[0], all_indices[i])
-        if intersection[0] == -1:
+        if len(intersection)>1 and intersection[0] == -1:
             intersection = intersection[1:]
 
         if len(intersection) > 0:
