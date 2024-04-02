@@ -525,6 +525,23 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
                     print("Converting", k, "to fp16")
                     dtype = torch.float16
 
+                # Print the size of the array we will allocate and how much memory it will take
+                print(
+                    "Allocating",
+                    k,
+                    "with shape",
+                    len(self.wrapped_dataset),
+                    *(features[k].shape[1:]),
+                    "and dtype",
+                    dtype,
+                    "which will take",
+                    len(self.wrapped_dataset)
+                    * np.prod(features[k].shape[1:])
+                    * features[k].element_size()
+                    / 1024**2,
+                    "MB",
+                )
+
                 self.appended_features[k] = torch.zeros(
                     len(self.wrapped_dataset),
                     *(features[k].shape[1:]),
@@ -563,6 +580,17 @@ class AugmentableDatasetPreloader(torch.utils.data.Dataset):
             if os.path.exists(self.augmented_cache_filename):
                 print("Loading augmented cache from", self.augmented_cache_filename)
                 state = torch.load(self.augmented_cache_filename)
+                print(
+                    "State loaded. The state is using {} MB of memory.".format(
+                        sum(
+                            [
+                                v.element_size() * v.nelement()
+                                for v in state["appended_features"].values()
+                            ]
+                        )
+                        / 1024**2
+                    )
+                )
                 self.appended_features = state["appended_features"]
                 self.appended = state["appended"]
                 del state
