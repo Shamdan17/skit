@@ -30,12 +30,18 @@ def _find_file_above_threshold_size(
     limit_files=10,
     return_all=False,
     p_keep=0.1,
+    skip_hidden=True,
 ):
     limit_modified = int(limit_files / p_keep)
 
     all_files = []
     start_time = time()
     for root, dirs, files in os.walk(directory):
+        if skip_hidden:
+            files = [f for f in files if not f[0] == "."]
+            dirs[:] = [d for d in dirs if not d[0] == "."]
+        # randomly sample 10 files from the directory
+        files = np.random.choice(files, 10, replace=False)
         for file in files:
             file_path = os.path.join(root, file)
             # If symbolic link, skip
@@ -392,6 +398,15 @@ def get_args():
         type=int,
         default=1024,
         help="Total MB to read/write. Default is 1024 MB",
+    )
+    parser.add_argument(
+        "-rs",
+        "--read-size",
+        required=False,
+        action="store",
+        type=int,
+        default=-1,
+        help="Total MB to read. Default is -1, which defaults to the same value as --size, which is 1024MB",
     )
     parser.add_argument(
         "-w",
