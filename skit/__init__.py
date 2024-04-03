@@ -1,3 +1,2 @@
-from .timers import *
 from .datatools import *
-from .memory import *
+from .profiling import *
