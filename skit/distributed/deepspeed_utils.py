@@ -601,21 +601,27 @@ try:
     from lightning.pytorch.callbacks import ModelCheckpoint
 
     class ZeroLightModelCheckpoint(ModelCheckpoint):
-        def __init__(self, *args, save_dtype=torch.bfloat16, delete_after_save=True, remove_equal_signs=True, change_to_pt=True, **kwargs):
+        def __init__(self, *args, save_dtype=torch.bfloat16, delete_after_save=True, remove_equal_signs=True, change_to_pt=True, replace_epoch=True, one_indexed=True, start_save_epoch=-1, **kwargs):
             super().__init__(*args, **kwargs)
             self.save_dtype = save_dtype
             self.delete_after_save = delete_after_save
             self.remove_equal_signs = remove_equal_signs
             self.change_to_pt = change_to_pt
-
+            self.replace_epoch = replace_epoch
+            self.one_indexed = one_indexed
+            self.start_save_epoch = start_save_epoch
 
         @override 
         def _save_checkpoint(self, trainer, filepath):
+            if trainer.current_epoch < self.start_save_epoch:
+                return
             super()._save_checkpoint(trainer, filepath)
             print("Saved checkpoint to ", filepath)
             
             if trainer.is_global_zero:    
                 maindir, target_for_conversion = os.path.split(filepath)
+                if self.replace_epoch and self.one_indexed:
+                    target_for_conversion = target_for_conversion.replace("epoch={}".format(trainer.current_epoch), "epoch={}".format(trainer.current_epoch+1))
                 if self.remove_equal_signs:
                     target_for_conversion = target_for_conversion.replace("=", "_")
                 if self.change_to_pt:

@@ -1,5 +1,5 @@
 import timeit
-
+from collections import defaultdict
 
 class BlockTimer:
     """
@@ -49,7 +49,7 @@ class Ticker:
     - verbose (bool): Whether to print verbose output or not. Default is True.
     """
 
-    def __init__(self, verbose=True):
+    def __init__(self, verbose=True, track=False):
         """
         Initialize the Timer object.
 
@@ -59,14 +59,19 @@ class Ticker:
         """
         self.reset()
         self.verbose = verbose
+        self.track = track
+        if self.track:
+            self.tracked_stats = defaultdict(lambda : tuple([0, 0]))
 
-    def reset(self):
+    def reset(self, reset_track=False):
         """
         Resets the timer by updating the start time to the current time.
 
         Call this function if you want to reset the timer without printing
         """
         self.start = timeit.default_timer()
+        if reset_track:
+            self.tracked_stats = defaultdict(lambda : tuple([0, 0]))
 
     def tick(self, name=None):
         """
@@ -90,6 +95,8 @@ class Ticker:
         if name is None:
             name = ""
         tick_time = (timeit.default_timer() - self.start) * 1000.0
+        if self.track:
+            self.tracked_stats[name] = (self.tracked_stats[name][0] + tick_time, self.tracked_stats[name][1] + 1)
         if self.verbose:
             print("Tick {} took: {:.2f} ms.".format(name, tick_time))
         self.start = timeit.default_timer()
@@ -113,3 +120,12 @@ class Ticker:
         - tick_time (float): The time elapsed since the last tick in milliseconds.
         """
         return self.tick(name)
+
+    def get_stats(self, verbose=True):
+        if not self.track:
+            return {}
+        
+        if verbose:
+            for key, value in self.tracked_stats.items():
+                print("Tick {} took: {:.2f} ms ({} times)".format(key, value[0]/value[1], value[1]))
+                
