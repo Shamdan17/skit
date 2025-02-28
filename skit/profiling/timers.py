@@ -1,6 +1,7 @@
 import timeit
 from collections import defaultdict
 
+
 class BlockTimer:
     """
     A simple timer class that prints the time elapsed for a code block.
@@ -49,7 +50,7 @@ class Ticker:
     - verbose (bool): Whether to print verbose output or not. Default is True.
     """
 
-    def __init__(self, verbose=True, track=False, sync_cuda=False):
+    def __init__(self, verbose=True, track=False, sync_cuda=False, enabled=True):
         """
         Initialize the Timer object.
 
@@ -57,15 +58,17 @@ class Ticker:
         - verbose (bool): Whether to print verbose output or not. Default is True. If false, only the
         time elapsed since the last tick will be returned without printing.
         """
+        self.enabled = enabled
         self.reset()
         self.verbose = verbose
         self.track = track
         if self.track:
-            self.tracked_stats = defaultdict(lambda : tuple([0, 0]))
-            
+            self.tracked_stats = defaultdict(lambda: tuple([0, 0]))
+
         self.sync_cuda = sync_cuda
         if self.sync_cuda:
             import torch
+
             self.sync_function = torch.cuda.synchronize
 
     def reset(self, reset_track=False):
@@ -74,9 +77,11 @@ class Ticker:
 
         Call this function if you want to reset the timer without printing
         """
+        if not self.enabled:
+            return
         self.start = timeit.default_timer()
         if reset_track:
-            self.tracked_stats = defaultdict(lambda : tuple([0, 0]))
+            self.tracked_stats = defaultdict(lambda: tuple([0, 0]))
 
     def tick(self, name=None, track=True):
         """
@@ -97,13 +102,18 @@ class Ticker:
         Returns:
         - tick_time (float): The time elapsed since the last tick in milliseconds.
         """
+        if not self.enabled:
+            return 0
         if name is None:
             name = ""
         if self.sync_cuda:
             self.sync_function()
         tick_time = (timeit.default_timer() - self.start) * 1000.0
         if self.track and track:
-            self.tracked_stats[name] = (self.tracked_stats[name][0] + tick_time, self.tracked_stats[name][1] + 1)
+            self.tracked_stats[name] = (
+                self.tracked_stats[name][0] + tick_time,
+                self.tracked_stats[name][1] + 1,
+            )
         if self.verbose:
             print("Tick {} took: {:.2f} ms.".format(name, tick_time))
         self.start = timeit.default_timer()
@@ -129,10 +139,13 @@ class Ticker:
         return self.tick(name, track)
 
     def get_stats(self, verbose=True):
-        if not self.track:
+        if not self.track or not self.enabled:
             return {}
-        
+
         if verbose:
             for key, value in self.tracked_stats.items():
-                print("Tick {} took: {:.2f} ms ({} times)".format(key, value[0]/value[1], value[1]))
-                
+                print(
+                    "Tick {} took: {:.2f} ms ({} times)".format(
+                        key, value[0] / value[1], value[1]
+                    )
+                )

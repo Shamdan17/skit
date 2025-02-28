@@ -63,6 +63,8 @@ class DatasetPreloader(torch.utils.data.Dataset):
         preloading_workers=10,
         samples_to_confirm_cache=100,
     ):
+
+        print("Initializing wrapper on rank ", get_rank())
         self.dataset = dataset
         self.cache_path = cache_path
         self.pre_load = not lazy_loading

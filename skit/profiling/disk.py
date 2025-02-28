@@ -236,7 +236,8 @@ def assert_diskspace_available(file, size):
 
 def simple_profile(
     file_path,
-    size=128,
+    w_size=128,
+    r_size=128,
     write_block_size_kb=1024,
     read_block_size_kb=1024,
     verbose=False,
@@ -254,10 +255,10 @@ def simple_profile(
 
     # Make sure we have write access to the directory
     assert_file_writeable(file)
-    assert_diskspace_available(file, size * 1024 * 1024)
+    assert_diskspace_available(file, w_size * 1024 * 1024)
 
-    write_blocks = int(size * 1024 / write_block_size_kb)
-    read_blocks = int(size * 1024 / read_block_size_kb)
+    write_blocks = int(w_size * 1024 / write_block_size_kb)
+    read_blocks = int(r_size * 1024 / read_block_size_kb)
 
     try:
         write_results = test_file_write(
@@ -461,6 +462,11 @@ def get_args():
         "-v", "--verbose", required=False, action="store_true", help="Verbose mode"
     )
     args = parser.parse_args()
+
+    # Post init
+    if args.read_size == -1:
+        args.read_size = args.size
+
     return args
 
 
